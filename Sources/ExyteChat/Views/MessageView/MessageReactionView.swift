@@ -5,33 +5,42 @@
 
 import SwiftUI
 
+struct GroupedReaction: Hashable, Identifiable {
+    var id: String { emoji }
+    let emoji: String
+    let count: Int
+    let containsCurrentUser: Bool
+    let latestDate: Date
+    let isSending: Bool
+    let hasError: Bool
+}
+
 extension MessageView {
-    
+
     @ViewBuilder
     func reactionsView(_ message: Message, maxReactions: Int = 5) -> some View {
         let preparedReactions = prepareReactions(message: message, maxReactions: maxReactions)
-        let overflowBubbleText = "+\(message.reactions.count - maxReactions + 1)"
-        
-        HStack(spacing: -bubbleSize.width / 5) {
+        let overflowCount = preparedReactions.overflowCount
+        let overflowBubbleText = "+\(overflowCount)"
+
+        HStack(spacing: 4) {
             if !message.user.isCurrentUser {
                 overflowBubbleView(
-                    leadingSpacer: true,
                     needsOverflowBubble: preparedReactions.needsOverflowBubble,
                     text: overflowBubbleText,
                     containsReactionFromCurrentUser: preparedReactions.overflowContainsCurrentUser
                 )
             }
-            
-            ForEach(Array(preparedReactions.reactions.enumerated()), id: \.element) { index, reaction in
-                ReactionBubble(reaction: reaction, font: Font(font))
+
+            ForEach(Array(preparedReactions.groups.enumerated()), id: \.element) { index, group in
+                ReactionBubble(group: group, font: Font(font))
                     .transition(.scaleAndFade)
-                    .zIndex(message.user.isCurrentUser ? Double(preparedReactions.reactions.count - index) : Double(index + 1))
+                    .zIndex(message.user.isCurrentUser ? Double(preparedReactions.groups.count - index) : Double(index + 1))
                     .sizeGetter($bubbleSize)
             }
-            
+
             if message.user.isCurrentUser {
                 overflowBubbleView(
-                    leadingSpacer: false,
                     needsOverflowBubble: preparedReactions.needsOverflowBubble,
                     text: overflowBubbleText,
                     containsReactionFromCurrentUser: preparedReactions.overflowContainsCurrentUser
@@ -43,102 +52,119 @@ extension MessageView {
             y: 0
         )
     }
-    
+
     @ViewBuilder
-    func overflowBubbleView(leadingSpacer:Bool, needsOverflowBubble:Bool, text:String, containsReactionFromCurrentUser:Bool) -> some View {
+    func overflowBubbleView(needsOverflowBubble: Bool, text: String, containsReactionFromCurrentUser: Bool) -> some View {
         if needsOverflowBubble {
             ReactionBubble(
-                reaction: .init(
-                    user: .init(
-                        id: "null",
-                        name: "",
-                        avatarURL: nil,
-                        isCurrentUser: containsReactionFromCurrentUser
-                    ),
-                    type: .emoji(text),
-                    status: .sent
+                group: GroupedReaction(
+                    emoji: text,
+                    count: 1,
+                    containsCurrentUser: containsReactionFromCurrentUser,
+                    latestDate: .now,
+                    isSending: false,
+                    hasError: false
                 ),
                 font: .footnote.weight(.light)
             )
             .padding(message.user.isCurrentUser ? .trailing : .leading, -3)
         }
     }
-    
+
     struct PreparedReactions {
-        /// Sorted Reactions by most recent -> oldest (trimmed to maxReactions)
-        let reactions:[Reaction]
-        /// Indicates whether we need to add an overflow bubble (due to the number of Reactions exceeding maxReactions)
-        let needsOverflowBubble:Bool
-        /// Indicates whether the clipped reactions (oldest reactions beyond maxReaction) contain a reaction from the current user
-        /// - Note: This value is used to color the background of the overflow bubble
-        let overflowContainsCurrentUser:Bool
+        let groups: [GroupedReaction]
+        let needsOverflowBubble: Bool
+        let overflowContainsCurrentUser: Bool
+        let overflowCount: Int
     }
-    
-    /// Orders the reactions by most recent to oldest, reverses their layout based on alignment and determines if an overflow bubble is necessary
-    private func prepareReactions(message:Message, maxReactions:Int) -> PreparedReactions {
+
+    private func prepareReactions(message: Message, maxReactions: Int) -> PreparedReactions {
         guard maxReactions > 1, !message.reactions.isEmpty else {
-            return .init(reactions: [], needsOverflowBubble: false, overflowContainsCurrentUser: false)
+            return .init(groups: [], needsOverflowBubble: false, overflowContainsCurrentUser: false, overflowCount: 0)
         }
-        // If we have more reactions than maxReactions, then we'll need an overflow bubble
-        let needsOverflowBubble = message.reactions.count > maxReactions
-        // Sort all reactions by most recent -> oldest
-        var reactions = Array(message.reactions.sorted(by: { $0.createdAt > $1.createdAt }))
-        // Check if our current user has a reaction in the overflow reactions (used for coloring the overflow bubble)
-        var overflowContainsCurrentUser: Bool = false
+
+        // group reactions by emoji
+        var groupsByEmoji: [String: [Reaction]] = [:]
+        for reaction in message.reactions {
+            let key = reaction.emoji ?? "?"
+            groupsByEmoji[key, default: []].append(reaction)
+        }
+
+        // build grouped reactions sorted by most recent reaction date
+        var groups: [GroupedReaction] = groupsByEmoji.map { emoji, reactions in
+            let latestDate = reactions.map(\.createdAt).max() ?? .distantPast
+            let containsCurrentUser = reactions.contains { $0.user.isCurrentUser }
+            let isSending = reactions.contains { $0.status == .sending }
+            let hasError = reactions.contains {
+                if case .error = $0.status { return true }
+                return false
+            }
+            return GroupedReaction(
+                emoji: emoji,
+                count: reactions.count,
+                containsCurrentUser: containsCurrentUser,
+                latestDate: latestDate,
+                isSending: isSending,
+                hasError: hasError
+            )
+        }
+        groups.sort { $0.latestDate > $1.latestDate }
+
+        let needsOverflowBubble = groups.count > maxReactions
+        var overflowContainsCurrentUser = false
+        var overflowCount = 0
+
         if needsOverflowBubble {
-           overflowContainsCurrentUser = reactions[min(reactions.count, maxReactions)...].contains(where: {  $0.user.isCurrentUser })
+            let overflowGroups = groups[min(groups.count, maxReactions - 1)...]
+            overflowContainsCurrentUser = overflowGroups.contains { $0.containsCurrentUser }
+            overflowCount = overflowGroups.reduce(0) { $0 + $1.count }
+            groups = Array(groups.prefix(maxReactions - 1))
         }
-        // Trim the reactions array if necessary
-        if needsOverflowBubble { reactions = Array(reactions.prefix(maxReactions - 1)) }
-        
+
         return .init(
-            reactions: message.user.isCurrentUser ? reactions : reactions.reversed(),
+            groups: message.user.isCurrentUser ? groups : groups.reversed(),
             needsOverflowBubble: needsOverflowBubble,
-            overflowContainsCurrentUser: overflowContainsCurrentUser
+            overflowContainsCurrentUser: overflowContainsCurrentUser,
+            overflowCount: overflowCount
         )
     }
 }
 
 struct ReactionBubble: View {
-    
+
     @Environment(\.chatTheme) var theme
-    
-    let reaction: Reaction
+
+    let group: GroupedReaction
     let font: Font
-    
+
     @State private var phase = 0.0
-    
+
     var fillColor: Color {
-        switch reaction.status {
-        case .sending, .sent, .read:
-            return reaction.user.isCurrentUser ? theme.colors.messageMyBG : theme.colors.messageFriendBG
-        case .error:
+        if group.hasError {
             return .red
         }
+        return group.containsCurrentUser ? theme.colors.messageMyBG : theme.colors.messageFriendBG
     }
-    
+
     var opacity: Double {
-        switch reaction.status {
-        case .sent, .read:
-            return 1.0
-        case .sending, .error:
+        if group.isSending || group.hasError {
             return 0.7
         }
+        return 1.0
     }
-    
+
     var body: some View {
-        Text(reaction.emoji ?? "?")
+        Text(group.count > 1 ? "\(group.emoji) \(group.count)" : group.emoji)
             .font(font)
             .opacity(opacity)
-            .foregroundStyle(theme.colors.messageText(reaction.user.type))
-            .padding(6)
+            .padding(.horizontal, group.count > 1 ? 8 : 6)
+            .padding(.vertical, 6)
             .background(
                 ZStack {
-                    Circle()
+                    Capsule()
                         .fill(fillColor)
-                    // If the reaction is in flight, animate the stroke
-                    if reaction.status == .sending {
-                        Circle()
+                    if group.isSending {
+                        Capsule()
                             .stroke(style: .init(lineWidth: 2, lineCap: .round, dash: [100, 50], dashPhase: phase))
                             .fill(theme.colors.messageFriendBG)
                             .onAppear {
@@ -146,9 +172,8 @@ struct ReactionBubble: View {
                                     phase -= 150
                                 }
                             }
-                    // Otherwise just stroke the circle normally
                     } else {
-                        Circle()
+                        Capsule()
                             .stroke(style: .init(lineWidth: 2))
                             .fill(theme.colors.mainBG)
                     }
