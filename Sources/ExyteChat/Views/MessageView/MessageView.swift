@@ -124,7 +124,7 @@ struct MessageView: View {
                 bubbleView(message)
             }
 
-            if message.user.isCurrentUser, let status = message.status {
+            if message.user.isCurrentUser, let status = message.status, case .error = status {
                 MessageStatusView(status: status) {
                     if case let .error(draft) = status {
                         viewModel.sendMessage(draft)

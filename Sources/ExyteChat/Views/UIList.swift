@@ -46,6 +46,11 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
     let listSwipeActions: ListSwipeActions
     let keyboardDismissMode: UIScrollView.KeyboardDismissMode
 
+    // FocusGroup custom
+    var readReceiptReaders: [String: [User]] = [:]
+    var onVerifyCompletion: ((String) async -> Void)?
+    var onPhotoTap: ((Message) -> Void)?
+
     @State var isScrolledToTop = false
     @State var updateQueue = UpdateQueue()
 
@@ -85,6 +90,11 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ tableView: UITableView, context: Context) {
+        // Sync FocusGroup mutable properties
+        context.coordinator.readReceiptReaders = readReceiptReaders
+        context.coordinator.onVerifyCompletion = onVerifyCompletion
+        context.coordinator.onPhotoTap = onPhotoTap
+
         if !isScrollEnabled {
             DispatchQueue.main.async {
                 tableContentHeight = tableView.contentSize.height
@@ -375,7 +385,10 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             messageLinkPreviewLimit: messageLinkPreviewLimit, messageFont: messageFont,
             sections: sections, ids: ids, mainBackgroundColor: theme.colors.mainBG,
             listSwipeActions: listSwipeActions,
-            keyboardDismissMode: keyboardDismissMode)
+            keyboardDismissMode: keyboardDismissMode,
+            readReceiptReaders: readReceiptReaders,
+            onVerifyCompletion: onVerifyCompletion,
+            onPhotoTap: onPhotoTap)
     }
 
     class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
@@ -413,6 +426,11 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
         let listSwipeActions: ListSwipeActions
         let keyboardDismissMode: UIScrollView.KeyboardDismissMode
 
+        // FocusGroup custom
+        var readReceiptReaders: [String: [User]]
+        var onVerifyCompletion: ((String) async -> Void)?
+        var onPhotoTap: ((Message) -> Void)?
+
         private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
 
         init(
@@ -426,7 +444,10 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             shouldShowLinkPreview: @escaping (URL) -> Bool, showMessageTimeView: Bool,
             messageLinkPreviewLimit: Int, messageFont: UIFont, sections: [MessagesSection],
             ids: [String], mainBackgroundColor: Color, paginationTargetIndexPath: IndexPath? = nil,
-            listSwipeActions: ListSwipeActions, keyboardDismissMode: UIScrollView.KeyboardDismissMode
+            listSwipeActions: ListSwipeActions, keyboardDismissMode: UIScrollView.KeyboardDismissMode,
+            readReceiptReaders: [String: [User]] = [:],
+            onVerifyCompletion: ((String) async -> Void)? = nil,
+            onPhotoTap: ((Message) -> Void)? = nil
         ) {
             self.viewModel = viewModel
             self.inputViewModel = inputViewModel
@@ -452,6 +473,9 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             self.paginationTargetIndexPath = paginationTargetIndexPath
             self.listSwipeActions = listSwipeActions
             self.keyboardDismissMode = keyboardDismissMode
+            self.readReceiptReaders = readReceiptReaders
+            self.onVerifyCompletion = onVerifyCompletion
+            self.onPhotoTap = onPhotoTap
         }
 
         /// call pagination handler when this row is reached
@@ -572,18 +596,28 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             tableViewCell.backgroundColor = UIColor(mainBackgroundColor)
 
             let row = sections[indexPath.section].rows[indexPath.row]
+            let readers = readReceiptReaders[row.message.id] ?? []
             tableViewCell.contentConfiguration = UIHostingConfiguration {
-                ChatMessageView(
-                    viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type,
-                    avatarSize: avatarSize, tapAvatarClosure: tapAvatarClosure,
-                    messageStyler: messageStyler, shouldShowLinkPreview: shouldShowLinkPreview,
-                    isDisplayingMessageMenu: false, showMessageTimeView: showMessageTimeView,
-                    messageLinkPreviewLimit: messageLinkPreviewLimit, messageFont: messageFont
-                )
+                VStack(alignment: .trailing, spacing: 0) {
+                    ChatMessageView(
+                        viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type,
+                        avatarSize: avatarSize, tapAvatarClosure: tapAvatarClosure,
+                        messageStyler: messageStyler, shouldShowLinkPreview: shouldShowLinkPreview,
+                        isDisplayingMessageMenu: false, showMessageTimeView: showMessageTimeView,
+                        messageLinkPreviewLimit: messageLinkPreviewLimit, messageFont: messageFont,
+                        onVerify: onVerifyCompletion,
+                        onPhotoTap: onPhotoTap
+                    )
+
+                    if !readers.isEmpty {
+                        ReadReceiptAvatarsView(readers: readers)
+                            .padding(.trailing, 16)
+                    }
+                }
                 .transition(.scale)
                 .background(MessageMenuPreferenceViewSetter(id: row.id))
                 .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
-                .applyIf(showMessageMenuOnLongPress) {
+                .applyIf(showMessageMenuOnLongPress && row.message.messageType != .system && !row.message.isDeleted) {
                     $0.simultaneousGesture(
                         TapGesture().onEnded { } // add empty tap to prevent iOS17 scroll breaking bug (drag on cells stops working)
                     )

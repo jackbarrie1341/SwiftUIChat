@@ -132,6 +132,14 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
     var recorderSettings: RecorderSettings = RecorderSettings()
     var listSwipeActions: ListSwipeActions = ListSwipeActions()
     var keyboardDismissMode: UIScrollView.KeyboardDismissMode = .none
+
+    // MARK: - FocusGroup Custom Properties
+    /// Map of messageId -> [User] who have read up to that message
+    var readReceiptReaders: [String: [User]] = [:]
+    /// Closure called when user taps verify on a verification message
+    var onVerifyCompletion: ((String) async -> Void)?
+    /// Closure called when user taps a verification photo
+    var onPhotoTap: ((Message) -> Void)?
     
     @StateObject private var viewModel = ChatViewModel()
     @StateObject private var inputViewModel = InputViewModel()
@@ -352,7 +360,10 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
             sections: sections,
             ids: ids,
             listSwipeActions: listSwipeActions,
-            keyboardDismissMode: keyboardDismissMode
+            keyboardDismissMode: keyboardDismissMode,
+            readReceiptReaders: readReceiptReaders,
+            onVerifyCompletion: onVerifyCompletion,
+            onPhotoTap: onPhotoTap
         )
         .applyIf(!isScrollEnabled) {
             $0.frame(height: tableContentHeight)
@@ -762,6 +773,29 @@ public extension ChatView {
             allowEmojiSearch: allowEmojiSearchFor,
             shouldShowOverview: shouldShowOverviewFor
         )
+        return view
+    }
+
+    // MARK: - FocusGroup Custom Modifiers
+
+    /// Pass read receipt data: map of messageId -> users who have read up to that message
+    func setReadReceipts(_ readers: [String: [User]]) -> ChatView {
+        var view = self
+        view.readReceiptReaders = readers
+        return view
+    }
+
+    /// Set verification action handler
+    func onVerify(_ handler: @escaping (String) async -> Void) -> ChatView {
+        var view = self
+        view.onVerifyCompletion = handler
+        return view
+    }
+
+    /// Set photo tap handler for verification messages
+    func onVerificationPhotoTap(_ handler: @escaping (Message) -> Void) -> ChatView {
+        var view = self
+        view.onPhotoTap = handler
         return view
     }
 }

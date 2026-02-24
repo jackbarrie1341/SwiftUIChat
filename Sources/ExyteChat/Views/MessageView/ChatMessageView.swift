@@ -26,9 +26,39 @@ struct ChatMessageView<MessageContent: View>: View {
     let messageLinkPreviewLimit: Int
     let messageFont: UIFont
 
+    // Closures for FocusGroup custom actions
+    var onVerify: ((String) async -> Void)?
+    var onPhotoTap: ((Message) -> Void)?
+
     var body: some View {
         Group {
-            if let messageBuilder = messageBuilder {
+            // Handle deleted messages first
+            if row.message.isDeleted {
+                DeletedMessageCell(message: row.message)
+            }
+            // Handle custom message types (FocusGroup)
+            else if row.message.messageType == .system {
+                SystemMessageCell(message: row.message)
+            }
+            else if row.message.messageType == .verification {
+                VerificationMessageCell(
+                    message: row.message,
+                    isCurrentUser: row.message.user.isCurrentUser,
+                    avatarSize: avatarSize,
+                    onVerify: row.message.completionId != nil ? {
+                        await onVerify?(row.message.completionId!)
+                    } : nil,
+                    onPhotoTap: { onPhotoTap?(row.message) }
+                )
+            }
+            else if row.message.messageType == .checkin {
+                CheckinMessageCell(
+                    message: row.message,
+                    avatarSize: avatarSize
+                )
+            }
+            // Custom message builder (user-provided)
+            else if let messageBuilder = messageBuilder {
                 messageBuilder(
                     row.message,
                     row.positionInUserGroup,
@@ -38,7 +68,9 @@ struct ChatMessageView<MessageContent: View>: View {
                     viewModel.messageMenuAction()) { attachment in
                         self.viewModel.presentAttachmentFullScreen(attachment)
                     }
-            } else {
+            }
+            // Default message view
+            else {
                 MessageView(
                     viewModel: viewModel,
                     message: row.message,

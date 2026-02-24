@@ -7,6 +7,32 @@
 
 import SwiftUI
 
+// MARK: - Custom Message Type (FocusGroup)
+
+public enum MessageType: String, Codable, Sendable, Hashable {
+    case text
+    case image
+    case system
+    case verification
+    case checkin
+}
+
+// MARK: - Check-in Line (FocusGroup)
+
+public struct CheckinLine: Hashable, Sendable {
+    public let habitName: String
+    public let completed: Bool
+    public let value: String?
+
+    public init(habitName: String, completed: Bool, value: String? = nil) {
+        self.habitName = habitName
+        self.completed = completed
+        self.value = value
+    }
+}
+
+// MARK: - Message
+
 public struct Message: Identifiable, Hashable, Sendable {
 
     public enum Status: Equatable, Hashable, Sendable {
@@ -63,6 +89,24 @@ public struct Message: Identifiable, Hashable, Sendable {
 
     public var triggerRedraw: UUID?
 
+    // MARK: - Custom Message Type (FocusGroup)
+    public var messageType: MessageType
+    public var isDeleted: Bool
+
+    // Verification-specific
+    public var habitName: String?
+    public var isVerified: Bool
+    public var verifierName: String?
+    public var completionId: String?
+
+    // Check-in-specific
+    public var checkinDate: Date?
+    public var checkinLines: [CheckinLine]?
+    public var dayNumber: Int?
+
+    // System-specific
+    public var systemEvent: String?
+
     public init(id: String,
                 user: User,
                 status: Status? = nil,
@@ -72,7 +116,17 @@ public struct Message: Identifiable, Hashable, Sendable {
                 giphyMediaId: String? = nil,
                 reactions: [Reaction] = [],
                 recording: Recording? = nil,
-                replyMessage: ReplyMessage? = nil) {
+                replyMessage: ReplyMessage? = nil,
+                messageType: MessageType = .text,
+                isDeleted: Bool = false,
+                habitName: String? = nil,
+                isVerified: Bool = false,
+                verifierName: String? = nil,
+                completionId: String? = nil,
+                checkinDate: Date? = nil,
+                checkinLines: [CheckinLine]? = nil,
+                dayNumber: Int? = nil,
+                systemEvent: String? = nil) {
 
         self.id = id
         self.user = user
@@ -84,6 +138,16 @@ public struct Message: Identifiable, Hashable, Sendable {
         self.reactions = reactions
         self.recording = recording
         self.replyMessage = replyMessage
+        self.messageType = messageType
+        self.isDeleted = isDeleted
+        self.habitName = habitName
+        self.isVerified = isVerified
+        self.verifierName = verifierName
+        self.completionId = completionId
+        self.checkinDate = checkinDate
+        self.checkinLines = checkinLines
+        self.dayNumber = dayNumber
+        self.systemEvent = systemEvent
     }
 
     public static func makeMessage(
@@ -140,7 +204,11 @@ extension Message: Equatable {
         lhs.attachments == rhs.attachments &&
         lhs.reactions == rhs.reactions &&
         lhs.recording == rhs.recording &&
-        lhs.replyMessage == rhs.replyMessage
+        lhs.replyMessage == rhs.replyMessage &&
+        lhs.messageType == rhs.messageType &&
+        lhs.isDeleted == rhs.isDeleted &&
+        lhs.isVerified == rhs.isVerified &&
+        lhs.verifierName == rhs.verifierName
     }
 }
 
